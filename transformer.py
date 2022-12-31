@@ -9,10 +9,10 @@ import gc
 import math
 
 #Data loading
-X_train = np.array(np.load('X_train.npz',allow_pickle=True)['arr_0'], dtype=np.float16)
-X_val = np.array(np.load('X_val.npz', allow_pickle=True)['arr_0'], dtype=np.float16)
-y_train = np.array(np.load('y_train.npz',allow_pickle=True)['arr_0'])
-y_val = np.array(np.load('y_val.npz', allow_pickle=True)['arr_0'])
+X_train = np.array(np.load('X_train.npz')['arr_0'], dtype=np.float16)
+X_val = np.array(np.load('X_val.npz')['arr_0'], dtype=np.float16)
+y_train = np.array(np.load('y_train.npz')['arr_0'])
+y_val = np.array(np.load('y_val.npz')['arr_0'])
 
 num_layers = 4
 d_model = 64
@@ -21,7 +21,9 @@ num_heads = 8
 
 print(X_train.shape)
 print(X_val.shape)
-print(y_train.shape)
+print(y_val.shape)
+print(y_train[34])
+print(y_train[56], y_train[75])
 
 class BaseAttention(tf.keras.layers.Layer):
     def __init__(self, **kwargs):
@@ -91,14 +93,11 @@ class Encoder(tf.keras.layers.Layer):
         self.enc_layers = [
             EncoderLayer(d_model=d_model,
                         num_heads=num_heads,
-                        dff=dff,)
+                        dff=dff)
             for _ in range(num_layers)]
         # self.dropout = tf.keras.layers.Dropout(dropout_rate)
 
     def call(self, x):
-        # `x` is token-IDs shape: (batch, seq_len)
-        # x = self.pos_embedding(x)  # Shape `(batch_size, seq_len, d_model)`.
-
         # # Add dropout.
         # x = self.dropout(x)
         # print("Shape of input after dropout: ", x.shape)
@@ -114,6 +113,11 @@ class Transformer(tf.keras.Model):
     def __init__(self, *, num_layers, d_model, num_heads, dff):
         super().__init__()
         # self.intial_layer = tf.keras.layers.Conv1D(filters=64, kernel_size = (3, 3))
+        self.convLayers = tf.keras.Sequential([ tf.keras.layers.Conv1D(filters=64, kernel_size=3),
+                                                tf.keras.layers.MaxPool1D(pool_size=2),
+                                                tf.keras.layers.Conv1D(filters=64, kernel_size=3)
+                                               ])
+        
         self.encoder = Encoder(num_layers=num_layers, d_model=d_model,
                             num_heads=num_heads, dff=dff)
 
@@ -126,22 +130,12 @@ class Transformer(tf.keras.Model):
         # To use a Keras model with `.fit` you must pass all your inputs in the
         # first argument.
         eeg_data = inputs
-    
+        eeg_data = self.convLayers(eeg_data)
         eeg_data = self.encoder(eeg_data)  # (batch_size, eeg_data_len, d_model)
-
-        # x = self.decoder(x, eeg_data)  # (batch_size, target_len, d_model)
 
         # Final linear layer output.
         final_output = self.final_layer(eeg_data)  # (batch_size, target_len, target_vocab_size)
         # print("FINAL OUTPUT SHAPE: ", final_output.shape)
-
-        # try:
-        #     # Drop the keras mask, so it doesn't scale the losses/metrics.
-        #     # b/250038731
-        #     del logits._keras_mask
-
-        # except AttributeError:
-        #     pass
 
         # Return the final output and the attention weights.
         return final_output
@@ -153,14 +147,22 @@ transformer = Transformer(num_layers=num_layers, d_model=d_model, num_heads=num_
 # attn_scores = transformer.decoder.dec_layers[-1].last_attn_scores
 # print(attn_scores.shape)  # (batch, heads, target_seq, input_seq)
 
-transformer.compile(loss='binary_crossentropy', optimizer='Adam', metrics=['accuracy'])
+transformer.compile(loss='binary_crossentropy', optimizer='SGD', metrics=['accuracy']) #SGD #learning_rate
 
-transformer.fit(X_train, y_train, batch_size=50, epochs=20)
+
+"""MODEL CHECKPOINTING"""
+checkpoint_filepath = 'bestmodel.h5'
+model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_filepath, save_weights_only=True, 
+                                                               monitor='val_accuracy',
+                                                               mode='max', save_best_only=True)
+
+
+transformer.fit(X_train, y_train, batch_size=32, epochs=32)
 
 print("============================Transformer Summary============================")
 print(transformer.summary())
 
-accuracy1 = transformer.evaluate(X_val, y_val, batch_size=50)
-accuracy2 = transformer.evaluate(X_train, y_train, batch_size=50)
+accuracy1 = transformer.evaluate(X_val, y_val, batch_size=32)
+accuracy2 = transformer.evaluate(X_train, y_train, batch_size=32)
 print(accuracy1)
 print(accuracy2)
