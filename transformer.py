@@ -8,7 +8,7 @@ import os
 import gc
 import math
 
-#Data loading
+"""Data loading"""
 X_train = np.array(np.load('X_train.npz')['arr_0'], dtype=np.float16)
 X_val = np.array(np.load('X_val.npz')['arr_0'], dtype=np.float16)
 y_train = np.array(np.load('y_train.npz')['arr_0'])
@@ -16,7 +16,7 @@ y_val = np.array(np.load('y_val.npz')['arr_0'])
 
 num_layers = 4
 d_model = 64
-dff = 64
+dff = 128
 num_heads = 8
 
 print(X_train.shape)
@@ -25,6 +25,49 @@ print(y_val.shape)
 print(y_train[34])
 print(y_train[56], y_train[75])
 
+
+""" Sinusoidal Positional Embedding """
+class Sinusoidal_PE(tf.keras.layers.Layer):
+    
+    def __init__(self, maxlen, embed_dim):
+        
+        #### Defining Essentials
+        super().__init__()
+        self.maxlen = maxlen # Maximum Sequence Length
+        self.embed_dim = embed_dim # Embedding Dimensions of the Positional Encodings                                           
+
+        #### Defining Layers
+        position_embedding_matrix = self.get_position_encoding(self.maxlen, self.embed_dim)
+        self.position_embedding_layer = tf.keras.layers.Embedding(
+            input_dim=self.maxlen, output_dim=self.embed_dim,
+            weights=[position_embedding_matrix],
+            trainable=False
+        )
+
+    def get_config(self):
+        config = super().get_config().copy()
+        config.update({
+            'maxlen': self.maxlen, 
+            'embed_dim': self.embed_dim 
+        })
+        return config 
+             
+    def get_position_encoding(self, seq_len, d, n=10000):
+        P = np.zeros((seq_len, d))
+        for k in range(seq_len):
+            for i in np.arange(int(d/2)):
+                denominator = np.power(n, 2*i/d)
+                P[k, 2*i] = np.sin(k/denominator)
+                P[k, 2*i+1] = np.cos(k/denominator)
+        return P
+ 
+    def call(self, inputs):        
+        position_indices = tf.range(tf.shape(inputs)[-2])
+        embedded_indices = self.position_embedding_layer(position_indices)
+        return inputs+embedded_indices
+    
+    
+"""Attention"""
 class BaseAttention(tf.keras.layers.Layer):
     def __init__(self, **kwargs):
         super().__init__()
@@ -61,7 +104,7 @@ class FeedForward(tf.keras.layers.Layer):
         return x
 
 
-#THE ENCODER layer
+"""THE ENCODER layer"""
 class EncoderLayer(tf.keras.layers.Layer):
     def __init__(self,*, d_model, num_heads, dff):
         super().__init__()
@@ -90,11 +133,8 @@ class Encoder(tf.keras.layers.Layer):
 
         
 
-        self.enc_layers = [
-            EncoderLayer(d_model=d_model,
-                        num_heads=num_heads,
-                        dff=dff)
-            for _ in range(num_layers)]
+        self.enc_layers = [EncoderLayer(d_model=d_model, num_heads=num_heads, dff=dff) for _ in range(num_layers)]
+        
         # self.dropout = tf.keras.layers.Dropout(dropout_rate)
 
     def call(self, x):
@@ -110,13 +150,14 @@ class Encoder(tf.keras.layers.Layer):
 
 """TRANSFORMER"""
 class Transformer(tf.keras.Model):
-    def __init__(self, *, num_layers, d_model, num_heads, dff):
+    def __init__(self, *, num_layers, d_model, num_heads, dff, timesteps_each_segment):
         super().__init__()
         # self.intial_layer = tf.keras.layers.Conv1D(filters=64, kernel_size = (3, 3))
         self.convLayers = tf.keras.Sequential([ tf.keras.layers.Conv1D(filters=64, kernel_size=3),
-                                                tf.keras.layers.MaxPool1D(pool_size=2),
                                                 tf.keras.layers.Conv1D(filters=64, kernel_size=3)
                                                ])
+        
+        self.pos_encoding = Sinusoidal_PE(timesteps_each_segment, d_model)
         
         self.encoder = Encoder(num_layers=num_layers, d_model=d_model,
                             num_heads=num_heads, dff=dff)
@@ -131,6 +172,7 @@ class Transformer(tf.keras.Model):
         # first argument.
         eeg_data = inputs
         eeg_data = self.convLayers(eeg_data)
+        eeg_data = self.pos_encoding(eeg_data)
         eeg_data = self.encoder(eeg_data)  # (batch_size, eeg_data_len, d_model)
 
         # Final linear layer output.
@@ -140,29 +182,38 @@ class Transformer(tf.keras.Model):
         # Return the final output and the attention weights.
         return final_output
 
-
 """Calling Transformer"""
-transformer = Transformer(num_layers=num_layers, d_model=d_model, num_heads=num_heads, dff=dff)
+transformer = Transformer(num_layers=num_layers, d_model=d_model, num_heads=num_heads, dff=dff, timesteps_each_segment=128)
 
 # attn_scores = transformer.decoder.dec_layers[-1].last_attn_scores
 # print(attn_scores.shape)  # (batch, heads, target_seq, input_seq)
-
-transformer.compile(loss='binary_crossentropy', optimizer='SGD', metrics=['accuracy']) #SGD #learning_rate
+opt = tf.keras.optimizers.SGD(learning_rate=0.001)
+transformer.compile(loss='binary_crossentropy', optimizer=opt, metrics=['accuracy']) #SGD #learning_rate
 
 
 """MODEL CHECKPOINTING"""
-checkpoint_filepath = 'bestmodel.h5'
-model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_filepath, save_weights_only=True, 
-                                                               monitor='val_accuracy',
-                                                               mode='max', save_best_only=True)
+checkpoint_path = "/transformer_model.ckpt"
+checkpoint_dir = os.path.dirname(checkpoint_path)
 
+# Create a callback that saves the model's weights
+cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_path, save_weights_only=True, save_best_only=True, verbose=1)
 
-transformer.fit(X_train, y_train, batch_size=32, epochs=32)
+transformer.fit(X_train, y_train, batch_size=32, epochs=60)
 
 print("============================Transformer Summary============================")
 print(transformer.summary())
 
-accuracy1 = transformer.evaluate(X_val, y_val, batch_size=32)
-accuracy2 = transformer.evaluate(X_train, y_train, batch_size=32)
-print(accuracy1)
-print(accuracy2)
+accuracy1 = transformer.evaluate(X_val, y_val)
+accuracy2 = transformer.evaluate(X_train, y_train)
+
+print("Accuracy on val: ", accuracy1)
+print("Accuracy on train: ", accuracy2)
+
+# Basic model instance
+model_transformer = tf.keras.Model()
+model_transformer.load_weights(checkpoint_path)
+
+# evaluate the model
+loss, acc = model_transformer.evaluate(X_val, y_val, verbose=2)
+print("Validation model, accuracy: {:5.2f}%".format(100 * acc))
+
