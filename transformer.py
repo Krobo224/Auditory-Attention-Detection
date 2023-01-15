@@ -7,6 +7,8 @@ import pandas as pd
 import os
 import gc
 import math
+from sklearn.metrics import confusion_matrix
+import matplotlib.pyplot as plt
 
 """Data loading"""
 X_train = np.array(np.load('X_train.npz')['arr_0'], dtype=np.float16)
@@ -189,31 +191,58 @@ transformer = Transformer(num_layers=num_layers, d_model=d_model, num_heads=num_
 # print(attn_scores.shape)  # (batch, heads, target_seq, input_seq)
 opt = tf.keras.optimizers.SGD(learning_rate=0.001)
 transformer.compile(loss='binary_crossentropy', optimizer=opt, metrics=['accuracy']) #SGD #learning_rate
+#sparse_categorical
 
 
 """MODEL CHECKPOINTING"""
-checkpoint_path = "/transformer_model.ckpt"
-checkpoint_dir = os.path.dirname(checkpoint_path)
+# filepath= "D:\BCI\Datasets\KUL_new_version\bestmodel.h5"
+# checkpoint = tf.keras.callbacks.ModelCheckpoint(filepath,monitor='val_accuracy',save_best_only=True,mode='max')
+# checkpoint_dir = os.path.dirname(checkpoint_path)
+filepath= "./Models/AAD_Transformer.ckpt"
+# checkpoint = tf.keras.callbacks.ModelCheckpoint(filepath, monitor='val_accuracy', mode='max', save_best_only=True, save_weights_only=True)
+
 
 # Create a callback that saves the model's weights
-cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_path, save_weights_only=True, save_best_only=True, verbose=1)
+# cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_path, save_weights_only=False, save_best_only=False, verbose=1, period=1)
 
-transformer.fit(X_train, y_train, batch_size=32, epochs=60)
+# transformer.fit(X_train, y_train, batch_size=128, epochs=100, validation_data=(X_val, y_val), callbacks=[checkpoint])
+# print("============================Transformer Summary============================")
+# print(transformer.summary())
 
-print("============================Transformer Summary============================")
-print(transformer.summary())
+# accuracy1 = transformer.evaluate(X_val, y_val)
+# accuracy2 = transformer.evaluate(X_train, y_train)
 
-accuracy1 = transformer.evaluate(X_val, y_val)
-accuracy2 = transformer.evaluate(X_train, y_train)
+# print("Accuracy on val: ", accuracy1)
+# print("Accuracy on train: ", accuracy2)
 
-print("Accuracy on val: ", accuracy1)
-print("Accuracy on train: ", accuracy2)
 
-# Basic model instance
-model_transformer = tf.keras.Model()
-model_transformer.load_weights(checkpoint_path)
+transformer.load_weights(filepath)
+# accuracy1 = transformer.evaluate(X_val, y_val)
+# accuracy2 = transformer.evaluate(X_train, y_train)
 
-# evaluate the model
-loss, acc = model_transformer.evaluate(X_val, y_val, verbose=2)
-print("Validation model, accuracy: {:5.2f}%".format(100 * acc))
+y_pred = transformer.predict(X_val)
+y_pred1 = []
+for k in y_pred:
+    if k > 0.5:
+        y_pred1.append(1)
+    else:
+        y_pred1.append(0)
+
+y_pred1 = np.array(y_pred1)
+
+conf_matrix = confusion_matrix(y_true=y_val, y_pred=y_pred1)
+print("---------------Confusion Matrix---------------")
+fig, ax = plt.subplots(figsize=(7.5, 7.5))
+ax.matshow(conf_matrix, cmap=plt.cm.Blues, alpha=0.3)
+for i in range(conf_matrix.shape[0]):
+    for j in range(conf_matrix.shape[1]):
+        ax.text(x=j, y=i,s=conf_matrix[i, j], va='center', ha='center', size='xx-large')
+ 
+plt.xlabel('Predictions', fontsize=18)
+plt.ylabel('Actuals', fontsize=18)
+plt.title('Confusion Matrix', fontsize=18)
+plt.show()
+
+# print("Accuracy on val", accuracy1)
+# print("Accuracy on train", accuracy2)
 
