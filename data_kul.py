@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import random
 import biosppy
 from biosppy import signals as biosig
-from scipy.fftpack import fft, ifft
+
 
 # data = loadmat('preprocessed_data/S1.mat')
 # print(type(data['preproc_trials'][0][1]['experiment'][0][0][0][0]))
@@ -27,63 +27,24 @@ overlap_status = True
 if overlap_status == True:
     rem = 1 - overlapp
     per_window_overlapp = int(rem*window_size) # for getting to the first index of next window
+
+def decompose_into_bands(eeg_window):
+    delta,_,_ =  biosig.tools.filter_signal(signal=np.reshape(eeg_window, (64, eeg_window.shape[0])), ftype='butter', band='bandpass', order=4, frequency=[0.1, 4], sampling_rate=sampling_rate)
+    theta,_,_ = biosig.tools.filter_signal(signal=np.reshape(eeg_window, (64, eeg_window.shape[0])), ftype='butter', band='bandpass', order=4, frequency=[4, 8], sampling_rate=sampling_rate)
+    alpha,_,_ = biosig.tools.filter_signal(signal=np.reshape(eeg_window, (64, eeg_window.shape[0])), ftype='butter', band='bandpass', order=4, frequency=[8, 13], sampling_rate=sampling_rate)
+    beta,_,_ = biosig.tools.filter_signal(signal=np.reshape(eeg_window, (64, eeg_window.shape[0])), ftype='butter', band='bandpass', order=4, frequency=[13, 30], sampling_rate=sampling_rate)
+    gamma,_,_ = biosig.tools.filter_signal(signal=np.reshape(eeg_window, (64, eeg_window.shape[0])), ftype='butter', band='bandpass', order=4, frequency=[30, 60], sampling_rate=sampling_rate)
     
-def eeg_decompose(eeg):
-    # Get the number of timesteps and channels
-    timesteps = eeg.shape[0]
-    channels = eeg.shape[1]
-    
-    delta = [0.5, 4]
-    theta = [4, 7]
-    alpha = [8, 13]
-    beta = [13, 30]
-    gamma = [30, 100]
-    
-    # Initialize the decomposed signals
-    delta_signal = np.zeros_like(eeg)
-    theta_signal = np.zeros_like(eeg)
-    alpha_signal = np.zeros_like(eeg)
-    beta_signal = np.zeros_like(eeg)
-    gamma_signal = np.zeros_like(eeg)
-    
-    for i in range(channels):
-        # compute the fft of EEG signal
-        spectrum = fft(eeg[:, i])
-        
-        # defining frequency axis
-        N = timesteps
-        freq = np.arange(0, N) / N*sampling_rate
-        
-        #Creating mask for each frequncy band
-        delta_mask = (freq >= delta[0]) & (freq <= delta[1])
-        theta_mask = (freq >= theta[0]) & (freq <= theta[1])
-        alpha_mask = (freq >= alpha[0]) & (freq <= alpha[1])
-        beta_mask = (freq >= beta[0]) & (freq <= beta[1])
-        gamma_mask = (freq >= gamma[0]) & (freq <= gamma[1])
-        
-        # Create a copy of the FFT representation for each frequency band
-        delta_spectrum = spectrum.copy()
-        theta_spectrum = spectrum.copy()
-        alpha_spectrum = spectrum.copy()
-        beta_spectrum = spectrum.copy()
-        gamma_spectrum = spectrum.copy()
-        
-        # Mask out the non-relevant frequency components for each frequency band
-        delta_spectrum[~delta_mask] = 0
-        theta_spectrum[~theta_mask] = 0
-        alpha_spectrum[~alpha_mask] = 0
-        beta_spectrum[~beta_mask] = 0
-        gamma_spectrum[~gamma_mask] = 0
-        
-        # Compute the inverse FFT for each frequency band
-        delta_signal[:, i] = ifft(delta_spectrum).real
-        theta_signal[:, i] = ifft(theta_spectrum).real
-        alpha_signal[:, i] = ifft(alpha_spectrum).real
-        beta_signal[:, i] = ifft(beta_spectrum).real
-        gamma_signal[:, i] = ifft(gamma_spectrum).real
-        
-    return_arr = np.stack((delta_signal, theta_signal, alpha_signal, beta_signal, gamma_signal))
-    return return_arr
+    delta = np.reshape(delta, (delta.shape[1], 64))
+    theta = np.reshape(theta, (theta.shape[1], 64))
+    alpha = np.reshape(alpha, (alpha.shape[1], 64))
+    beta = np.reshape(beta, (beta.shape[1], 64))
+    gamma = np.reshape(gamma, (gamma.shape[1], 64))
+    # print("Delta Shape", delta.shape)
+    # print("Theta Shape", theta.shape)
+    decomposed_eeg = np.stack((delta, theta, alpha, beta, gamma))
+    # print("DECOMPOSED_EEG", decomposed_eeg.shape)
+    return decomposed_eeg
 
 def divide_into_segments(window_size, per_window_overlapp, overlap_status, trial_train, trial_test, attended_ear_value):
     k=0
@@ -92,10 +53,10 @@ def divide_into_segments(window_size, per_window_overlapp, overlap_status, trial
         # print("temp: ", temp.shape)
         if temp.shape == (window_size, trial_train.shape[1]):
             # band separation
-            # print("Temp shape", temp.shape)
-            temp_decompose = eeg_decompose(temp)
-            # print("Decomposed shape", temp_decompose.shape)
-            X_train.append(temp_decompose)
+            
+            temp_decomposed = decompose_into_bands(temp)
+            
+            X_train.append(temp_decomposed)
             y_train.append(attended_ear_value)
 
         if overlap_status == True:
@@ -109,9 +70,9 @@ def divide_into_segments(window_size, per_window_overlapp, overlap_status, trial
         # print("temp: ", temp.shape)
         if temp.shape == (window_size, trial_test.shape[1]):
             
-            temp_decompose = eeg_decompose(temp)
+            temp_decomposed = decompose_into_bands(temp)
             
-            X_test.append(temp_decompose)
+            X_test.append(temp_decomposed)
             y_test.append(attended_ear_value)
         
         if overlap_status == True:
@@ -176,7 +137,7 @@ print("y_val shape: ", y_val.shape)
 
 # print(y_train)
 
-
+# exit()
 ##### Saving Numpy Arrays
 np.savez_compressed('X_train_cnn.npz',np.array(X_train))
 np.savez_compressed('y_train_cnn.npz',np.array(y_train))
