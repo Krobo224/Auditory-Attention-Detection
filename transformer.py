@@ -12,7 +12,6 @@ import matplotlib.pyplot as plt
 
 
 ### LOADING THE DATA ###
-"""Data loading"""
 X_train = np.array(np.load('X_train.npz')['arr_0'], dtype=np.float16)
 X_val = np.array(np.load('X_val.npz')['arr_0'], dtype=np.float16)
 y_train = np.array(np.load('y_train.npz')['arr_0'])
