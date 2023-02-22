@@ -173,7 +173,7 @@ class Transformer(tf.keras.Model):
 ### CALLING TRANSFORMER ###
 transformer = Transformer(num_layers=num_layers, d_model=d_model, num_heads=num_heads, dff=dff, timesteps_each_segment=128)
 opt = tf.keras.optimizers.SGD(learning_rate=0.001)
-transformer.compile(loss='SGD', optimizer=opt, metrics=['accuracy'])
+transformer.compile(loss='binary_crossentropy', optimizer=opt, metrics=['accuracy'])
 
 
 ### MODEL CHECKPOINTING ###
